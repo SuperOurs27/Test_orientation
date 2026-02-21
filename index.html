@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>Stratégie Navarre</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body { margin: 0; padding: 0; font-family: 'Segoe UI', sans-serif; background: #f4f4f4; overflow: hidden; }
+        #map { height: 50vh; width: 100%; border-bottom: 3px solid #2c3e50; }
+        #interface { padding: 10px; text-align: center; height: 50vh; background: white; box-sizing: border-box; }
+        
+        /* Badges */
+        #timer-badge { position: absolute; top: 10px; left: 10px; background: #e74c3c; color: white; padding: 8px 15px; border-radius: 20px; z-index: 1000; font-weight: bold; border: 2px solid white; }
+        .score-board { position: absolute; top: 10px; right: 10px; background: rgba(0,0,0,0.8); color: #f1c40f; padding: 8px 15px; border-radius: 20px; z-index: 1000; font-weight: bold; border: 2px solid #f1c40f; }
+
+        /* Tableau des distances */
+        .distance-container { display: flex; justify-content: space-around; background: #ecf0f1; border-radius: 10px; padding: 10px; margin: 10px 0; }
+        .distance-box { flex: 1; }
+        .dist-val { font-size: 1.6em; font-weight: bold; display: block; }
+        .dist-label { font-size: 0.8em; color: #7f8c8d; text-transform: uppercase; }
+        .color-principale { color: #d35400; }
+        .color-bonus { color: #2980b9; }
+
+        .hidden { display: none; }
+        input { padding: 12px; width: 80%; font-size: 1em; border-radius: 8px; border: 2px solid #bdc3c7; margin-bottom: 10px; }
+        button { background: #27ae60; color: white; border: none; padding: 12px 25px; border-radius: 8px; font-weight: bold; }
+        .user-dot { background: #3498db; width: 15px; height: 15px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 10px rgba(0,0,0,0.5); }
+    </style>
+</head>
+<body>
+
+    <div id="timer-badge">⏳ <span id="time-left">60:00</span></div>
+    <div class="score-board">💰 <span id="score">0</span> pts</div>
+    <div id="map"></div>
+
+    <div id="interface">
+        <div class="distance-container">
+            <div class="distance-box">
+                <span class="dist-label">Quête</span>
+                <span id="dist-principale" class="dist-val color-principale">-- m</span>
+            </div>
+            <div style="width: 2px; background: #bdc3c7; margin: 0 10px;"></div>
+            <div class="distance-box">
+                <span class="dist-label">Trésor</span>
+                <span id="dist-bonus" class="dist-val color-bonus">Éteint</span>
+            </div>
+        </div>
+
+        <h3 id="nom-balise" style="margin: 5px 0; font-size: 1em;">Initialisation GPS...</h3>
+        
+        <div id="zone-enigme" class="hidden">
+            <p id="texte-enigme" style="margin: 5px 0; font-style: italic;"></p>
+            <input type="text" id="reponse" placeholder="Réponse..." autocomplete="off">
+            <button onclick="validerReponse()">VÉRIFIER</button>
+        </div>
+        <p id="message-erreur" style="color: #e74c3c; font-weight: bold;"></p>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        const zoneBonus = { latMin: 49.0160, latMax: 49.0260, lngMin: 1.1150, lngMax: 1.1350 };
+        const balises = [
+            { id: 1, nom: "Le Chêne d'Idéfix", lat: 49.01664, lng: 1.11657, enigme: "Combien de menhirs ?", reponse: "3", points: 10 },
+            { id: 2, nom: "La hutte du Druide", lat: 49.01754, lng: 1.11535, enigme: "Couleur de la potion ?", reponse: "rouge", points: 20 },
+            { id: 3, nom: "Le camp Romain", lat: 49.01650, lng: 1.11351, enigme: "Qui est le chef ?", reponse: "cesar", points: 50 }
+        ];
+
+        let tempsRestant = 60 * 60; 
+        let indexEtape = 0;
+        let score = 0;
+        let map, markerCible, markerJoueur, markerBonus;
+        let bonusActif = { lat: 0, lng: 0, visible: false };
+
+        map = L.map('map', { zoomControl: false }).setView([balises[0].lat, balises[0].lng], 16);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+        const iconeRouge = L.divIcon({ html: '<div style="background:red; width:18px; height:18px; border-radius:50%; border:2px solid white;"></div>', className: '' });
+        const iconeOr = L.divIcon({ html: '<div style="background:gold; width:20px; height:20px; border-radius:50%; border:2px solid white; box-shadow: 0 0 15px gold;"></div>', className: '' });
+
+        markerCible = L.marker([balises[indexEtape].lat, balises[indexEtape].lng], {icon: iconeRouge}).addTo(map);
+        markerBonus = L.marker([0, 0], {icon: iconeOr, opacity: 0}).addTo(map);
+
+        setInterval(() => {
+            if (tempsRestant <= 0) return terminerJeu("FIN DU TEMPS");
+            tempsRestant--;
+            let min = Math.floor(tempsRestant / 60);
+            let sec = tempsRestant % 60;
+            document.getElementById('time-left').innerText = min + ":" + (sec < 10 ? '0' : '') + sec;
+            if (tempsRestant % 600 === 0) genererBonus();
+        }, 1000);
+
+        function genererBonus() {
+            bonusActif.lat = Math.random() * (zoneBonus.latMax - zoneBonus.latMin) + zoneBonus.latMin;
+            bonusActif.lng = Math.random() * (zoneBonus.lngMax - zoneBonus.lngMin) + zoneBonus.lngMin;
+            bonusActif.visible = true;
+            markerBonus.setLatLng([bonusActif.lat, bonusActif.lng]).setOpacity(1);
+        }
+
+        if ("geolocation" in navigator) {
+            navigator.geolocation.watchPosition((pos) => {
+                let uLat = pos.coords.latitude;
+                let uLng = pos.coords.longitude;
+
+                if (!markerJoueur) {
+                    markerJoueur = L.marker([uLat, uLng], {icon: L.divIcon({className: 'user-dot'})}).addTo(map);
+                    map.panTo([uLat, uLng]);
+                } else {
+                    markerJoueur.setLatLng([uLat, uLng]);
+                }
+
+                // DISTANCE QUETE
+                let cible = balises[indexEtape];
+                if (cible) {
+                    let d = calculerDistance(uLat, uLng, cible.lat, cible.lng);
+                    document.getElementById('dist-principale').innerText = Math.round(d) + " m";
+                    if (d <= 25) {
+                        document.getElementById('zone-enigme').classList.remove('hidden');
+                        document.getElementById('nom-balise').innerText = "🎯 " + cible.nom;
+                        document.getElementById('texte-enigme').innerText = cible.enigme;
+                    } else {
+                        document.getElementById('zone-enigme').classList.add('hidden');
+                        document.getElementById('nom-balise').innerText = "Vers : " + cible.nom;
+                    }
+                }
+
+                // DISTANCE BONUS
+                if (bonusActif.visible) {
+                    let dB = calculerDistance(uLat, uLng, bonusActif.lat, bonusActif.lng);
+                    document.getElementById('dist-bonus').innerText = Math.round(dB) + " m";
+                    if (dB <= 25) {
+                        bonusActif.visible = false;
+                        markerBonus.setOpacity(0);
+                        score += 50;
+                        document.getElementById('score').innerText = score;
+                        document.getElementById('dist-bonus').innerText = "PRIS !";
+                        alert("💰 TRÉSOR TROUVÉ ! +50 pts");
+                    }
+                } else {
+                    document.getElementById('dist-bonus').innerText = "---";
+                }
+            }, null, { enableHighAccuracy: true });
+        }
+
+        function validerReponse() {
+            let champ = document.getElementById('reponse');
+            let r = champ.value.trim().toLowerCase();
+            let cible = balises[indexEtape];
+            if (r === cible.reponse.toLowerCase()) {
+                score += cible.points;
+                document.getElementById('score').innerText = score;
+                document.getElementById('zone-enigme').classList.add('hidden');
+                champ.value = "";
+                indexEtape++;
+                if (indexEtape < balises.length) {
+                    markerCible.setLatLng([balises[indexEtape].lat, balises[indexEtape].lng]);
+                    alert("Bravo ! +" + cible.points + " pts");
+                } else {
+                    terminerJeu("VICTOIRE !");
+                }
+            } else {
+                document.getElementById('message-erreur').innerText = "❌ Faux !";
+                setTimeout(() => { document.getElementById('message-erreur').innerText = ""; }, 2000);
+            }
+        }
+
+        function terminerJeu(t) {
+            document.getElementById('interface').innerHTML = `<h2>${t}</h2><h3>Score : ${score} pts</h3><button onclick="location.reload()">RECOMENCER</button>`;
+            tempsRestant = 0;
+            if(markerCible) map.removeLayer(markerCible);
+        }
+
+        function calculerDistance(lat1, lon1, lat2, lon2) {
+            var R = 6371e3;
+            var dLat = (lat2-lat1) * Math.PI/180;
+            var dLon = (lon2-lon1) * Math.PI/180;
+            var a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(lat1*Math.PI/180) * Math.cos(lat2*Math.PI/180) * Math.sin(dLon/2) * Math.sin(dLon/2);
+            return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        }
+
+        setTimeout(genererBonus, 5000);
+    </script>
+</body>
+</html>
