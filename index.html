@@ -8,7 +8,7 @@
     <style>
         body { margin: 0; padding: 0; font-family: 'Segoe UI', sans-serif; background: #f4f4f4; overflow: hidden; }
         #map { height: 50vh; width: 100%; border-bottom: 3px solid #2c3e50; }
-        #interface { padding: 10px; text-align: center; height: 50vh; background: white; box-sizing: border-box; }
+        #interface { padding: 10px; text-align: center; height: 50vh; background: white; box-sizing: border-box; position: relative; }
         
         /* Badges */
         #timer-badge { position: absolute; top: 10px; left: 10px; background: #e74c3c; color: white; padding: 8px 15px; border-radius: 20px; z-index: 1000; font-weight: bold; border: 2px solid white; }
@@ -23,8 +23,8 @@
         .color-bonus { color: #2980b9; }
 
         .hidden { display: none; }
-        input { padding: 12px; width: 80%; font-size: 1em; border-radius: 8px; border: 2px solid #bdc3c7; margin-bottom: 10px; }
-        button { background: #27ae60; color: white; border: none; padding: 12px 25px; border-radius: 8px; font-weight: bold; }
+        input { padding: 12px; width: 80%; font-size: 1em; border-radius: 8px; border: 2px solid #bdc3c7; margin-bottom: 10px; outline: none; }
+        button { background: #27ae60; color: white; border: none; padding: 12px 25px; border-radius: 8px; font-weight: bold; cursor: pointer; }
         .user-dot { background: #3498db; width: 15px; height: 15px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 10px rgba(0,0,0,0.5); }
     </style>
 </head>
@@ -47,19 +47,19 @@
             </div>
         </div>
 
-        <h3 id="nom-balise" style="margin: 5px 0; font-size: 1em;">Initialisation GPS...</h3>
+        <h3 id="nom-balise" style="margin: 5px 0; font-size: 1.1em;">Initialisation GPS...</h3>
         
         <div id="zone-enigme" class="hidden">
-            <p id="texte-enigme" style="margin: 5px 0; font-style: italic;"></p>
+            <p id="texte-enigme" style="margin: 5px 0; font-style: italic; color: #34495e; font-weight: bold;"></p>
             <input type="text" id="reponse" placeholder="Réponse..." autocomplete="off">
+            <br>
             <button onclick="validerReponse()">VÉRIFIER</button>
         </div>
-        <p id="message-erreur" style="color: #e74c3c; font-weight: bold;"></p>
+        <p id="message-erreur" style="color: #e74c3c; font-weight: bold; margin-top: 10px;"></p>
     </div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
-        const zoneBonus = { latMin: 49.0160, latMax: 49.0260, lngMin: 1.1150, lngMax: 1.1350 };
         const balises = [
             { id: 1, nom: "Le Chêne d'Idéfix", lat: 49.01664, lng: 1.11657, enigme: "Combien de menhirs ?", reponse: "3", points: 10 },
             { id: 2, nom: "La hutte du Druide", lat: 49.01754, lng: 1.11535, enigme: "Couleur de la potion ?", reponse: "rouge", points: 20 },
@@ -70,38 +70,70 @@
         let indexEtape = 0;
         let score = 0;
         let map, markerCible, markerJoueur, markerBonus;
-        let bonusActif = { lat: 0, lng: 0, visible: false };
+        
+        // Nouvelle gestion du bonus (avec un verrou "captured")
+        let bonusActif = { lat: 0, lng: 0, visible: false, captured: false };
 
         map = L.map('map', { zoomControl: false }).setView([balises[0].lat, balises[0].lng], 16);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
 
-        const iconeRouge = L.divIcon({ html: '<div style="background:red; width:18px; height:18px; border-radius:50%; border:2px solid white;"></div>', className: '' });
+        // --- DÉFINITION DES COULEURS ---
+        const iconeRouge = L.divIcon({ html: '<div style="background:#e74c3c; width:20px; height:20px; border-radius:50%; border:2px solid white; box-shadow: 0 0 5px rgba(0,0,0,0.5);"></div>', className: '' });
+        const iconeJaune = L.divIcon({ html: '<div style="background:#f1c40f; width:24px; height:24px; border-radius:50%; border:3px solid white; box-shadow: 0 0 10px #f1c40f;"></div>', className: '' });
+        const iconeVerte = L.divIcon({ html: '<div style="background:#2ecc71; width:20px; height:20px; border-radius:50%; border:2px solid white; box-shadow: 0 0 10px #2ecc71;"></div>', className: '' });
         const iconeOr = L.divIcon({ html: '<div style="background:gold; width:20px; height:20px; border-radius:50%; border:2px solid white; box-shadow: 0 0 15px gold;"></div>', className: '' });
 
+        // Initialisation des marqueurs
         markerCible = L.marker([balises[indexEtape].lat, balises[indexEtape].lng], {icon: iconeRouge}).addTo(map);
         markerBonus = L.marker([0, 0], {icon: iconeOr, opacity: 0}).addTo(map);
 
+        // --- HORLOGE ET APPARITION BONUS ---
         setInterval(() => {
             if (tempsRestant <= 0) return terminerJeu("FIN DU TEMPS");
             tempsRestant--;
             let min = Math.floor(tempsRestant / 60);
             let sec = tempsRestant % 60;
             document.getElementById('time-left').innerText = min + ":" + (sec < 10 ? '0' : '') + sec;
+            
             if (tempsRestant % 600 === 0) genererBonus();
         }, 1000);
 
+        // --- GÉNÉRATION DU BONUS DANS UN RAYON DE 500M ---
         function genererBonus() {
-            bonusActif.lat = Math.random() * (zoneBonus.latMax - zoneBonus.latMin) + zoneBonus.latMin;
-            bonusActif.lng = Math.random() * (zoneBonus.lngMax - zoneBonus.lngMin) + zoneBonus.lngMin;
+            if (!markerJoueur) {
+                // Si le GPS n'a pas encore trouvé le joueur, on réessaye dans 2 secondes
+                setTimeout(genererBonus, 2000);
+                return;
+            }
+            
+            let posJoueur = markerJoueur.getLatLng();
+            let rayonMax = 500; // 500 mètres
+            
+            // Calcul mathématique pour un point aléatoire autour du joueur
+            let r = Math.sqrt(Math.random()) * rayonMax; 
+            let theta = Math.random() * 2 * Math.PI;
+            
+            // Conversion des mètres en coordonnées GPS
+            let dLat = r * Math.cos(theta) / 111320;
+            let dLng = r * Math.sin(theta) / (111320 * Math.cos(posJoueur.lat * Math.PI / 180));
+            
+            bonusActif.lat = posJoueur.lat + dLat;
+            bonusActif.lng = posJoueur.lng + dLng;
             bonusActif.visible = true;
-            markerBonus.setLatLng([bonusActif.lat, bonusActif.lng]).setOpacity(1);
+            bonusActif.captured = false; // Réinitialise le verrou
+            
+            markerBonus.setLatLng([bonusActif.lat, bonusActif.lng]);
+            markerBonus.setIcon(iconeOr);
+            markerBonus.setOpacity(1);
         }
 
+        // --- GESTION DU GPS ---
         if ("geolocation" in navigator) {
             navigator.geolocation.watchPosition((pos) => {
                 let uLat = pos.coords.latitude;
                 let uLng = pos.coords.longitude;
 
+                // Mise à jour de la position du joueur
                 if (!markerJoueur) {
                     markerJoueur = L.marker([uLat, uLng], {icon: L.divIcon({className: 'user-dot'})}).addTo(map);
                     map.panTo([uLat, uLng]);
@@ -109,32 +141,47 @@
                     markerJoueur.setLatLng([uLat, uLng]);
                 }
 
-                // DISTANCE QUETE
+                // --- 1. GESTION DE LA QUÊTE PRINCIPALE ---
                 let cible = balises[indexEtape];
                 if (cible) {
                     let d = calculerDistance(uLat, uLng, cible.lat, cible.lng);
                     document.getElementById('dist-principale').innerText = Math.round(d) + " m";
+                    
                     if (d <= 25) {
+                        markerCible.setIcon(iconeJaune); // Passe en jaune car on est proche
                         document.getElementById('zone-enigme').classList.remove('hidden');
                         document.getElementById('nom-balise').innerText = "🎯 " + cible.nom;
                         document.getElementById('texte-enigme').innerText = cible.enigme;
                     } else {
+                        markerCible.setIcon(iconeRouge); // Repasse au rouge si on s'éloigne
                         document.getElementById('zone-enigme').classList.add('hidden');
                         document.getElementById('nom-balise').innerText = "Vers : " + cible.nom;
                     }
                 }
 
-                // DISTANCE BONUS
+                // --- 2. GESTION DU TRÉSOR (BONUS) ---
                 if (bonusActif.visible) {
                     let dB = calculerDistance(uLat, uLng, bonusActif.lat, bonusActif.lng);
                     document.getElementById('dist-bonus').innerText = Math.round(dB) + " m";
-                    if (dB <= 25) {
-                        bonusActif.visible = false;
-                        markerBonus.setOpacity(0);
+                    
+                    // Si on touche le bonus et qu'il n'a pas encore été capturé
+                    if (dB <= 25 && !bonusActif.captured) {
+                        bonusActif.captured = true; // Verrouille pour éviter les doublons
+                        
+                        // Ajout des points
                         score += 50;
                         document.getElementById('score').innerText = score;
                         document.getElementById('dist-bonus').innerText = "PRIS !";
-                        alert("💰 TRÉSOR TROUVÉ ! +50 pts");
+                        
+                        // Le marqueur passe au vert
+                        markerBonus.setIcon(iconeVerte);
+                        
+                        // Disparaît après 5 secondes
+                        setTimeout(() => {
+                            bonusActif.visible = false;
+                            markerBonus.setOpacity(0);
+                            document.getElementById('dist-bonus').innerText = "---";
+                        }, 5000);
                     }
                 } else {
                     document.getElementById('dist-bonus').innerText = "---";
@@ -142,30 +189,40 @@
             }, null, { enableHighAccuracy: true });
         }
 
+        // --- VALIDATION DES RÉPONSES ---
         function validerReponse() {
             let champ = document.getElementById('reponse');
             let r = champ.value.trim().toLowerCase();
             let cible = balises[indexEtape];
+            
             if (r === cible.reponse.toLowerCase()) {
+                // Ajout des points
                 score += cible.points;
                 document.getElementById('score').innerText = score;
                 document.getElementById('zone-enigme').classList.add('hidden');
                 champ.value = "";
+                
+                // On laisse un marqueur VERT définitif sur la carte à l'endroit validé
+                L.marker([cible.lat, cible.lng], {icon: iconeVerte}).addTo(map);
+                
                 indexEtape++;
+                
                 if (indexEtape < balises.length) {
+                    // On déplace le point cible et on le remet en ROUGE
                     markerCible.setLatLng([balises[indexEtape].lat, balises[indexEtape].lng]);
-                    alert("Bravo ! +" + cible.points + " pts");
+                    markerCible.setIcon(iconeRouge);
+                    alert("Bravo ! +" + cible.points + " pts. Direction la suite !");
                 } else {
                     terminerJeu("VICTOIRE !");
                 }
             } else {
-                document.getElementById('message-erreur').innerText = "❌ Faux !";
+                document.getElementById('message-erreur').innerText = "❌ Faux ! Cherche bien...";
                 setTimeout(() => { document.getElementById('message-erreur').innerText = ""; }, 2000);
             }
         }
 
         function terminerJeu(t) {
-            document.getElementById('interface').innerHTML = `<h2>${t}</h2><h3>Score : ${score} pts</h3><button onclick="location.reload()">RECOMENCER</button>`;
+            document.getElementById('interface').innerHTML = `<h2 style="color:#27ae60">${t}</h2><h3 style="font-size:1.5em;">Score Final : ${score} pts</h3><button onclick="location.reload()">REJOUER</button>`;
             tempsRestant = 0;
             if(markerCible) map.removeLayer(markerCible);
         }
@@ -178,7 +235,9 @@
             return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
         }
 
+        // Génère un premier bonus après 5 secondes pour tester le code
         setTimeout(genererBonus, 5000);
     </script>
 </body>
 </html>
+
