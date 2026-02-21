@@ -71,59 +71,58 @@
         let score = 0;
         let map, markerCible, markerJoueur, markerBonus;
         
-        // Nouvelle gestion du bonus (avec un verrou "captured")
         let bonusActif = { lat: 0, lng: 0, visible: false, captured: false };
 
         map = L.map('map', { zoomControl: false }).setView([balises[0].lat, balises[0].lng], 16);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
 
-        // --- DÉFINITION DES COULEURS ---
+        // --- DÉFINITION DES COULEURS ET DE LA PIÈCE ---
         const iconeRouge = L.divIcon({ html: '<div style="background:#e74c3c; width:20px; height:20px; border-radius:50%; border:2px solid white; box-shadow: 0 0 5px rgba(0,0,0,0.5);"></div>', className: '' });
         const iconeJaune = L.divIcon({ html: '<div style="background:#f1c40f; width:24px; height:24px; border-radius:50%; border:3px solid white; box-shadow: 0 0 10px #f1c40f;"></div>', className: '' });
         const iconeVerte = L.divIcon({ html: '<div style="background:#2ecc71; width:20px; height:20px; border-radius:50%; border:2px solid white; box-shadow: 0 0 10px #2ecc71;"></div>', className: '' });
-        const iconeOr = L.divIcon({ html: '<div style="background:gold; width:20px; height:20px; border-radius:50%; border:2px solid white; box-shadow: 0 0 15px gold;"></div>', className: '' });
+        
+        // Nouvelle Icône Pièce Bleue avec € centré
+        const iconePieceBleue = L.divIcon({ 
+            html: '<div style="background:#3498db; width:26px; height:26px; border-radius:50%; border:2px solid white; box-shadow: 0 0 10px #3498db; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 16px;">€</div>', 
+            className: '' 
+        });
 
-        // Initialisation des marqueurs
         markerCible = L.marker([balises[indexEtape].lat, balises[indexEtape].lng], {icon: iconeRouge}).addTo(map);
-        markerBonus = L.marker([0, 0], {icon: iconeOr, opacity: 0}).addTo(map);
+        markerBonus = L.marker([0, 0], {icon: iconePieceBleue, opacity: 0}).addTo(map);
 
-        // --- HORLOGE ET APPARITION BONUS ---
+        // --- HORLOGE GLOBALE (SANS LE BONUS) ---
         setInterval(() => {
             if (tempsRestant <= 0) return terminerJeu("FIN DU TEMPS");
             tempsRestant--;
             let min = Math.floor(tempsRestant / 60);
             let sec = tempsRestant % 60;
             document.getElementById('time-left').innerText = min + ":" + (sec < 10 ? '0' : '') + sec;
-            
-            if (tempsRestant % 600 === 0) genererBonus();
         }, 1000);
 
         // --- GÉNÉRATION DU BONUS DANS UN RAYON DE 500M ---
         function genererBonus() {
             if (!markerJoueur) {
-                // Si le GPS n'a pas encore trouvé le joueur, on réessaye dans 2 secondes
                 setTimeout(genererBonus, 2000);
                 return;
             }
             
             let posJoueur = markerJoueur.getLatLng();
-            let rayonMax = 500; // 500 mètres
+            let rayonMax = 500; 
             
-            // Calcul mathématique pour un point aléatoire autour du joueur
             let r = Math.sqrt(Math.random()) * rayonMax; 
             let theta = Math.random() * 2 * Math.PI;
             
-            // Conversion des mètres en coordonnées GPS
+            // Calcul mathématique simple (1 degré lat = ~111km)
             let dLat = r * Math.cos(theta) / 111320;
             let dLng = r * Math.sin(theta) / (111320 * Math.cos(posJoueur.lat * Math.PI / 180));
             
             bonusActif.lat = posJoueur.lat + dLat;
             bonusActif.lng = posJoueur.lng + dLng;
             bonusActif.visible = true;
-            bonusActif.captured = false; // Réinitialise le verrou
+            bonusActif.captured = false; 
             
             markerBonus.setLatLng([bonusActif.lat, bonusActif.lng]);
-            markerBonus.setIcon(iconeOr);
+            markerBonus.setIcon(iconePieceBleue); // On remet l'aspect "pièce bleue"
             markerBonus.setOpacity(1);
         }
 
@@ -133,7 +132,6 @@
                 let uLat = pos.coords.latitude;
                 let uLng = pos.coords.longitude;
 
-                // Mise à jour de la position du joueur
                 if (!markerJoueur) {
                     markerJoueur = L.marker([uLat, uLng], {icon: L.divIcon({className: 'user-dot'})}).addTo(map);
                     map.panTo([uLat, uLng]);
@@ -141,46 +139,46 @@
                     markerJoueur.setLatLng([uLat, uLng]);
                 }
 
-                // --- 1. GESTION DE LA QUÊTE PRINCIPALE ---
+                // 1. GESTION DE LA QUÊTE PRINCIPALE
                 let cible = balises[indexEtape];
                 if (cible) {
                     let d = calculerDistance(uLat, uLng, cible.lat, cible.lng);
                     document.getElementById('dist-principale').innerText = Math.round(d) + " m";
                     
                     if (d <= 25) {
-                        markerCible.setIcon(iconeJaune); // Passe en jaune car on est proche
+                        markerCible.setIcon(iconeJaune); 
                         document.getElementById('zone-enigme').classList.remove('hidden');
                         document.getElementById('nom-balise').innerText = "🎯 " + cible.nom;
                         document.getElementById('texte-enigme').innerText = cible.enigme;
                     } else {
-                        markerCible.setIcon(iconeRouge); // Repasse au rouge si on s'éloigne
+                        markerCible.setIcon(iconeRouge); 
                         document.getElementById('zone-enigme').classList.add('hidden');
                         document.getElementById('nom-balise').innerText = "Vers : " + cible.nom;
                     }
                 }
 
-                // --- 2. GESTION DU TRÉSOR (BONUS) ---
+                // 2. GESTION DE LA PIÈCE BLEUE (BONUS)
                 if (bonusActif.visible) {
                     let dB = calculerDistance(uLat, uLng, bonusActif.lat, bonusActif.lng);
                     document.getElementById('dist-bonus').innerText = Math.round(dB) + " m";
                     
-                    // Si on touche le bonus et qu'il n'a pas encore été capturé
                     if (dB <= 25 && !bonusActif.captured) {
-                        bonusActif.captured = true; // Verrouille pour éviter les doublons
+                        bonusActif.captured = true; 
                         
-                        // Ajout des points
                         score += 50;
                         document.getElementById('score').innerText = score;
                         document.getElementById('dist-bonus').innerText = "PRIS !";
                         
-                        // Le marqueur passe au vert
                         markerBonus.setIcon(iconeVerte);
                         
-                        // Disparaît après 5 secondes
+                        // Action différée après la capture
                         setTimeout(() => {
                             bonusActif.visible = false;
                             markerBonus.setOpacity(0);
                             document.getElementById('dist-bonus').innerText = "---";
+                            
+                            // LE NOUVEAU BONUS APPARAÎT DANS 5 MINUTES (300 000 ms)
+                            setTimeout(genererBonus, 300000); 
                         }, 5000);
                     }
                 } else {
@@ -196,19 +194,16 @@
             let cible = balises[indexEtape];
             
             if (r === cible.reponse.toLowerCase()) {
-                // Ajout des points
                 score += cible.points;
                 document.getElementById('score').innerText = score;
                 document.getElementById('zone-enigme').classList.add('hidden');
                 champ.value = "";
                 
-                // On laisse un marqueur VERT définitif sur la carte à l'endroit validé
                 L.marker([cible.lat, cible.lng], {icon: iconeVerte}).addTo(map);
                 
                 indexEtape++;
                 
                 if (indexEtape < balises.length) {
-                    // On déplace le point cible et on le remet en ROUGE
                     markerCible.setLatLng([balises[indexEtape].lat, balises[indexEtape].lng]);
                     markerCible.setIcon(iconeRouge);
                     alert("Bravo ! +" + cible.points + " pts. Direction la suite !");
@@ -235,9 +230,8 @@
             return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
         }
 
-        // Génère un premier bonus après 5 secondes pour tester le code
+        // Génère le tout premier bonus après 5 secondes pour lancer le jeu
         setTimeout(genererBonus, 5000);
     </script>
 </body>
 </html>
-
